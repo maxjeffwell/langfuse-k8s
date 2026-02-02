@@ -1,6 +1,6 @@
 # Langfuse Stable Configuration
 # Secrets managed via Doppler + External Secrets Operator
-# Updated: 2026-02-02 - Fixed probes for ClickHouse and web app
+# Updated: 2026-02-02 - Fixed probes for ClickHouse, web app, and S3 credentials
 
 langfuse:
   salt:
@@ -116,6 +116,14 @@ clickhouse:
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
+
+# S3/MinIO for blob storage
+s3:
+  deploy: true
+  auth:
+    existingSecret: langfuse-s3
+    rootUserSecretKey: root-user
+    rootPasswordSecretKey: root-password
 
 service:
   type: ClusterIP
