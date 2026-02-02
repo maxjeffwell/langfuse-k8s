@@ -1,0 +1,129 @@
+# Langfuse Stable Configuration
+# Secrets managed via Doppler + External Secrets Operator
+# Updated: 2026-02-02 - Added ClickHouse startup probe fix
+
+langfuse:
+  salt:
+    existingSecret: langfuse-salt
+    existingSecretKey: salt
+
+  encryptionKey:
+    existingSecret: langfuse-encryption
+    existingSecretKey: encryption-key
+
+  nextauth:
+    url: "https://langfuse.el-jefe.me"
+    secret:
+      existingSecret: langfuse-nextauth
+      existingSecretKey: nextauth-secret
+
+  features:
+    telemetryEnabled: false
+    signUpDisabled: false
+
+# Use Neon PostgreSQL (external)
+postgresql:
+  deploy: false
+  host: "ep-flat-resonance-addiekdb.c-2.us-east-1.aws.neon.tech"
+  port: 5432
+  auth:
+    username: "neondb_owner"
+    database: "langfuse"
+    existingSecret: langfuse-postgresql
+    existingSecretKey: postgres-password
+  args: "sslmode=require"
+
+# Use existing Redis
+redis:
+  deploy: false
+  host: "redis.default.svc.cluster.local"
+  port: 6379
+  auth:
+    existingSecret: redis-secrets
+    existingSecretKey: redis-password
+
+# Deploy ClickHouse with stable resources and probes
+clickhouse:
+  deploy: true
+  host: langfuse-clickhouse
+
+  auth:
+    username: default
+    existingSecret: langfuse-clickhouse
+    existingSecretKey: admin-password
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "100m"
+    limits:
+      memory: "2Gi"
+      cpu: "500m"
+
+  replicaCount: 1
+
+  zookeeper:
+    enabled: false
+
+  persistence:
+    size: 2Gi
+
+  # CRITICAL: Startup probe allows ClickHouse time to load large datasets
+  # Without this, liveness probe kills container during metadata loading
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30  # 30 * 10s = 5 minutes max startup time
+
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Langfuse web app resources
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# Langfuse web app probes
+startupProbe:
+  enabled: true
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+service:
+  type: ClusterIP
+  port: 3000
+
+replicaCount: 1

@@ -1,0 +1,31 @@
+# ClickHouse Startup Probe Fix
+# Apply with: helm upgrade langfuse langfuse/langfuse -n langfuse --reuse-values -f ~/langfuse-k8s/clickhouse-probe-fix.yaml
+#
+# Root cause: ClickHouse needs time to load large datasets (3.3GB+) during startup.
+# Without a startup probe, the liveness probe kills the container before it's ready.
+# Applied: 2026-02-02
+
+clickhouse:
+  # Startup probe allows ClickHouse time to load large datasets
+  # Disables liveness/readiness probes until startup succeeds
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30  # 30 * 10s = 5 minutes max startup time
+
+  # Liveness probe only runs AFTER startup probe succeeds
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3

@@ -1,0 +1,27 @@
+    2 apiVersion: networking.k8s.io/v1
+    3 kind: NetworkPolicy
+    4 metadata:
+    5   name: redis
+    6   namespace: default
+    7 spec:
+    8   podSelector:
+    9     matchLabels:
+   10       app: redis
+   11   policyTypes:
+   12   - Ingress
+   13   - Egress
+   14   ingress:
+   15   - from:
+   16     - podSelector:
+   17         matchLabels:
+   18           component: backend
+   19     - namespaceSelector:
+   20         matchLabels:
+   21           kubernetes.io/metadata.name: langfuse
+   22       podSelector:
+   23         matchLabels:
+   24           app: worker
+   25           app.kubernetes.io/name: langfuse
+   26     ports:
+   27     - port: 6379
+   28       protocol: TCP
