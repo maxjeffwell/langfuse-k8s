@@ -1,119 +1,167 @@
-# Langfuse Installation for Kubernetes
+# Langfuse K8s
 
-This directory contains everything you need to install Langfuse using your existing PostgreSQL on your Kubernetes cluster and integrate it with your existing LiteLLM proxy.
+Kubernetes deployment configuration for [Langfuse](https://langfuse.com) LLM observability, deployed via Helm with external Neon PostgreSQL, shared Redis, in-cluster ClickHouse, and MinIO blob storage. Integrates with LiteLLM to trace all LLM requests across the portfolio platform.
 
-## 📁 Files
+**URL:** `https://langfuse.el-jefe.me` | **Namespace:** `langfuse`
 
-- `setup-with-existing-postgres.sh` - **START HERE** - Discovers your PostgreSQL and configures Langfuse
-- `install-langfuse-only.sh` - Installs Langfuse (run after setup script)
-- `langfuse-values.yaml` - Helm chart configuration for Langfuse
-- `litellm-integration.md` - Guide to connect LiteLLM with Langfuse
-- `postgres.yaml` - (Not needed - you have PostgreSQL already)
-- `install.sh` - (Not needed - use the scripts above instead)
-- `README.md` - This file
+## Architecture
 
-## 🚀 Quick Start (Using Your Existing PostgreSQL)
-
-### 1. Copy files to your VPS
-
-From your local machine:
-```bash
-scp -r /home/maxjeffwell/langfuse-k8s maxjeffwell@86.48.29.183:~/
+```
+┌─────────────────────────────────────────────────────────┐
+│  langfuse namespace                                     │
+│  ┌──────────────┐  ┌─────────────┐  ┌───────────────┐  │
+│  │ Langfuse Web │  │ ClickHouse  │  │ MinIO (S3)    │  │
+│  │ + Worker     │  │ (analytics) │  │ (blob storage)│  │
+│  │ port 3000    │  │ 2Gi storage │  │               │  │
+│  └──────┬───────┘  └─────────────┘  └───────────────┘  │
+└─────────┼───────────────────────────────────────────────┘
+          │
+    ┌─────▼─────────────────────────────────────────┐
+    │  External Services                             │
+    │  ├── Neon PostgreSQL (metadata, sslmode=require)│
+    │  └── Shared Redis (default namespace)          │
+    └────────────────────────────────────────────────┘
 ```
 
-### 2. SSH into your VPS
+## Components
+
+| Component | Type | Purpose |
+|:----------|:-----|:--------|
+| **Langfuse Web + Worker** | Helm (in-cluster) | UI, API, trace processing |
+| **ClickHouse** | Helm (in-cluster) | Analytics queries, 2Gi storage |
+| **MinIO** | Helm (in-cluster) | S3-compatible blob storage |
+| **PostgreSQL** | Neon (external) | Metadata and configuration |
+| **Redis** | Shared cluster (external) | Session and cache management |
+
+## Prerequisites
+
+- Kubernetes cluster with Helm 3+
+- External Neon PostgreSQL database with a `langfuse` database created
+- Shared Redis accessible at `redis.default.svc.cluster.local`
+- Secrets provisioned via Doppler + External Secrets Operator (or created manually)
+
+## Secrets
+
+All secrets are managed via External Secrets Operator syncing from Doppler:
+
+| Secret | Keys | Purpose |
+|:-------|:-----|:--------|
+| `langfuse-salt` | `salt` | Data encryption salt |
+| `langfuse-encryption` | `encryption-key` | Encryption key |
+| `langfuse-nextauth` | `nextauth-secret` | NextAuth.js session secret |
+| `langfuse-postgresql` | `postgres-password` | Neon database credential |
+| `redis-secrets` | `redis-password` | Shared Redis credential |
+| `langfuse-clickhouse` | `admin-password` | ClickHouse admin password |
+| `langfuse-s3` | `root-user`, `root-password` | MinIO credentials |
+
+## Deployment
 
 ```bash
-ssh maxjeffwell@86.48.29.183
-cd ~/langfuse-k8s
+# Install/upgrade using the stable values
+helm upgrade --install langfuse langfuse/langfuse \
+  -n langfuse --create-namespace \
+  -f langfuse-values-stable.yaml
 ```
 
-### 3. Run the setup script
+### Key Helm Values
 
-This will automatically:
-- Find your existing PostgreSQL in the default namespace
-- Extract credentials from secrets
-- Create a new `langfuse` database
-- Generate secure secrets
-- Update langfuse-values.yaml with everything
+```yaml
+# External PostgreSQL (Neon)
+postgresql:
+  deploy: false
+  host: "<neon-endpoint>"
+  auth:
+    existingSecret: langfuse-postgresql
 
-```bash
-chmod +x setup-with-existing-postgres.sh
-./setup-with-existing-postgres.sh
+# External Redis (shared)
+redis:
+  deploy: false
+  host: "redis.default.svc.cluster.local"
+  auth:
+    existingSecret: redis-secrets
+
+# In-cluster ClickHouse
+clickhouse:
+  deploy: true
+  persistence:
+    size: 2Gi
+  resources:
+    requests: { memory: "1Gi", cpu: "100m" }
+    limits: { memory: "4Gi", cpu: "1" }
+  startupProbe:
+    enabled: true
+    failureThreshold: 30  # 5 min for large dataset loading
+
+# In-cluster MinIO
+s3:
+  deploy: true
+  auth:
+    existingSecret: langfuse-s3
 ```
 
-The script will guide you through the process and handle any missing information.
+## LiteLLM Integration
 
-### 4. Install Langfuse
+LiteLLM routes Claude and Groq requests and sends callbacks to Langfuse for trace collection.
 
-```bash
-chmod +x install-langfuse-only.sh
-./install-langfuse-only.sh
+**Configure LiteLLM:**
+
+```yaml
+# litellm config
+litellm_settings:
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
 ```
 
-This installs Langfuse using your existing PostgreSQL.
+**Environment variables for LiteLLM:**
 
-### 5. Access Langfuse
-
-Port forward to access locally:
 ```bash
-kubectl port-forward -n langfuse svc/langfuse 3000:3000
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000
 ```
 
-Then open http://localhost:3000 in your browser.
+See `litellm-integration.md` for the full step-by-step guide.
 
-Or expose via NodePort (edit `langfuse-values.yaml` and set `service.type: NodePort`).
+## ClickHouse Startup
 
-### 6. Connect LiteLLM
+ClickHouse can load large datasets (3GB+) on startup. The startup probe allows up to 5 minutes (`failureThreshold: 30 × periodSeconds: 10`) before liveness checks begin. Without this, Kubernetes kills the container during initial data loading.
 
-Follow the instructions in `litellm-integration.md` to connect your existing LiteLLM proxy to Langfuse.
+## Network Policy
 
-## 🔍 Verification
+Redis access is restricted via NetworkPolicy — only backend components and Langfuse workers can reach port 6379. See `redis-np.yaml`.
 
-Check that everything is running:
+## Files
+
+| File | Purpose |
+|:-----|:--------|
+| `langfuse-values-stable.yaml` | Production Helm values |
+| `litellm-integration.md` | LiteLLM → Langfuse integration guide |
+| `litellm-config-with-langfuse.yaml` | LiteLLM ConfigMap with callbacks enabled |
+| `clickhouse-probe-fix.yaml` | ClickHouse probe configuration |
+| `redis-np.yaml` | Redis NetworkPolicy |
+| `connect-litellm-to-langfuse.sh` | Script to inject Langfuse credentials into LiteLLM |
+| `enable-langfuse-callbacks.sh` | Enable Langfuse callbacks in LiteLLM config |
+
+## Verification
+
 ```bash
+# Check pod status
 kubectl get pods -n langfuse
-kubectl get svc -n langfuse
+
+# Port-forward to UI
+kubectl port-forward -n langfuse svc/langfuse 3000:3000
+
+# Open http://localhost:3000
 ```
 
-You should see:
-- `postgres-0` - Running
-- `langfuse-xxx` - Running
+## What Langfuse Captures
 
-## 📊 Usage
-
-1. Create a Langfuse account at http://localhost:3000
-2. Create a new project
-3. Get API keys from Settings → API Keys
-4. Add keys to your LiteLLM configuration
-5. Start seeing traces in Langfuse!
-
-## 🛠️ Troubleshooting
-
-**PostgreSQL not starting?**
-```bash
-kubectl logs -n langfuse postgres-0
-kubectl describe pod -n langfuse postgres-0
-```
-
-**Langfuse not starting?**
-```bash
-kubectl logs -n langfuse -l app.kubernetes.io/name=langfuse
-```
-
-**Can't connect to database?**
-- Check that DATABASE_URL password matches postgres.yaml
-- Verify PostgreSQL service: `kubectl get svc -n langfuse postgres`
-
-**Need to uninstall?**
-```bash
-helm uninstall langfuse -n langfuse
-kubectl delete -f postgres.yaml
-kubectl delete pvc postgres-pvc -n langfuse  # This deletes the data!
-```
-
-## 📚 Resources
-
-- [Langfuse Docs](https://langfuse.com/docs)
-- [LiteLLM Docs](https://docs.litellm.ai)
-- [Langfuse + LiteLLM Integration](https://langfuse.com/docs/integrations/litellm)
+| Data | Description |
+|:-----|:------------|
+| **Traces** | Full request lifecycle with timing |
+| **Generations** | Model inputs, outputs, and parameters |
+| **Token usage** | Prompt and completion token counts |
+| **Latency** | End-to-end and per-generation timing |
+| **Cost** | Estimated cost per model/request |
+| **Sessions** | Grouped multi-turn conversations |
+| **Errors** | Failed requests with error details |
