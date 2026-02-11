@@ -1,6 +1,6 @@
 # Langfuse Stable Configuration
 # Secrets managed via Doppler + External Secrets Operator
-# Updated: 2026-02-02 - Fixed probes for ClickHouse, web app, and S3 credentials
+# Updated: 2026-02-11 - Added system table TTLs via extraOverrides
 
 langfuse:
   salt:
@@ -93,6 +93,58 @@ clickhouse:
 
   persistence:
     size: 2Gi
+
+  # System table TTL configuration (3-day retention)
+  # Prevents unbounded growth of ClickHouse system log tables
+  # which caused OOM merge storms (metric_log hit 223 parts, 7+ GiB)
+  #
+  # IMPORTANT: opentelemetry_span_log uses <engine> (not <ttl>) because
+  # the default config.xml already defines <engine> for that table.
+  # ClickHouse 25.x crashes (error 36) when both <engine> and <ttl> coexist.
+  # All other tables use standalone <ttl> since they have no <engine> in config.
+  # asynchronous_insert_log already has 3-day TTL in default config.
+  # processors_profile_log default is 30 days — overridden to 3 days here.
+  extraOverrides: |
+    <clickhouse>
+      <query_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </query_log>
+      <trace_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </trace_log>
+      <text_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </text_log>
+      <metric_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </metric_log>
+      <asynchronous_metric_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </asynchronous_metric_log>
+      <part_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </part_log>
+      <opentelemetry_span_log>
+        <engine>
+            engine MergeTree
+            partition by toYYYYMM(finish_date)
+            order by (finish_date, finish_time_us, trace_id)
+            TTL finish_date + toIntervalDay(3)
+        </engine>
+      </opentelemetry_span_log>
+      <query_metric_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </query_metric_log>
+      <processors_profile_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </processors_profile_log>
+      <error_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </error_log>
+      <latency_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </latency_log>
+    </clickhouse>
 
   # CRITICAL: Startup probe allows ClickHouse time to load large datasets
   # Without this, liveness probe kills container during metadata loading
