@@ -172,10 +172,19 @@ clickhouse:
 # S3/MinIO for blob storage
 s3:
   deploy: true
+  image:
+    repository: bitnamilegacy/minio
+    tag: "2025.7.23-debian-12-r5"
   auth:
     existingSecret: langfuse-s3
     rootUserSecretKey: root-user
     rootPasswordSecretKey: root-password
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 10
+    failureThreshold: 5
 
 service:
   type: ClusterIP
