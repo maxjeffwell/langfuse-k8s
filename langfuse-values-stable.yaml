@@ -25,26 +25,28 @@ langfuse:
     signUpDisabled: false
 
   # Web deployment configuration
+  # Node load avg ~70+ on this 12-core VPS — need generous probe timeouts
   web:
+    livenessProbe:
+      initialDelaySeconds: 120
+      periodSeconds: 15
+      timeoutSeconds: 10
+      failureThreshold: 6
+
+    readinessProbe:
+      initialDelaySeconds: 90
+      periodSeconds: 15
+      timeoutSeconds: 10
+      failureThreshold: 6
+
+  # Worker deployment configuration
+  # No startupProbe support in chart — use generous initialDelay + failureThreshold instead
+  worker:
     livenessProbe:
       initialDelaySeconds: 120
       periodSeconds: 10
       timeoutSeconds: 5
-      failureThreshold: 3
-
-    readinessProbe:
-      initialDelaySeconds: 60
-      periodSeconds: 10
-      timeoutSeconds: 5
-      failureThreshold: 3
-
-  # Worker deployment configuration
-  worker:
-    livenessProbe:
-      initialDelaySeconds: 60
-      periodSeconds: 10
-      timeoutSeconds: 5
-      failureThreshold: 3
+      failureThreshold: 6
 
 # Use Neon PostgreSQL (external)
 postgresql:
