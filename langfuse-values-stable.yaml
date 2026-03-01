@@ -96,6 +96,9 @@ clickhouse:
   persistence:
     size: 2Gi
 
+  nodeSelector:
+    role: data
+
   # System table TTL configuration (3-day retention)
   # Prevents unbounded growth of ClickHouse system log tables
   # which caused OOM merge storms (metric_log hit 223 parts, 7+ GiB)
