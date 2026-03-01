@@ -25,8 +25,11 @@ langfuse:
     signUpDisabled: false
 
   # Web deployment configuration
-  # Node load avg ~70+ on this 12-core VPS — need generous probe timeouts
+  # Moved to vmi3115606 (data node) to avoid probe timeouts from CPU contention on vmi2951245
   web:
+    nodeSelector:
+      kubernetes.io/hostname: vmi3115606
+
     livenessProbe:
       initialDelaySeconds: 120
       periodSeconds: 15
