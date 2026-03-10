@@ -89,7 +89,6 @@ clickhouse:
       cpu: "100m"
     limits:
       memory: "4Gi"
-      cpu: "1"
 
   replicaCount: 1
 
